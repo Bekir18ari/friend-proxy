@@ -1,0 +1,49 @@
+const express = require("express");
+const app = express();
+
+// Basit hafiza-ici cache: ayni userId'yi tekrar tekrar sorgulamayalim
+const cache = new Map();
+const CACHE_TTL_MS = 1000 * 60 * 60; // 1 saat
+
+app.get("/", (req, res) => {
+  res.send("Proxy calisiyor.");
+});
+
+app.get("/account-info/:userId", async (req, res) => {
+  const userId = req.params.userId;
+
+  const cached = cache.get(userId);
+  if (cached && Date.now() - cached.time < CACHE_TTL_MS) {
+    return res.json(cached.data);
+  }
+
+  try {
+    const userResp = await fetch(`https://users.roblox.com/v1/users/${userId}`);
+
+    if (!userResp.ok) {
+      return res.status(userResp.status).json({ error: "roblox_api_error" });
+    }
+
+    const userData = await userResp.json();
+
+    let ageYears = 0;
+    if (userData.created) {
+      const createdDate = new Date(userData.created);
+      ageYears = Math.floor(
+        (Date.now() - createdDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000)
+      );
+    }
+
+    const result = { userId, ageYears };
+
+    cache.set(userId, { data: result, time: Date.now() });
+
+    res.json(result);
+  } catch (err) {
+    console.error("Hata:", err);
+    res.status(500).json({ error: "fetch_failed" });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Proxy " + PORT + " portunda calisiyor"));
